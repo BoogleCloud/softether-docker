@@ -1,6 +1,6 @@
 #!/bin/sh
 
-CONFIG=vpn_server.config
+CONFIG=/data/vpn_server.config
 
 cd /opt/softether/vpnserver
 
@@ -10,9 +10,30 @@ if ! test -f "$CONFIG"; then
   ./vpnserver start
   
   # wait for the initial config to get generated after the first run
-  sleep 2s
+  sleep 3s
 
+  if [ -n "$INT_NET_PREFIX" ]; then
+    HOST_IP="${INT_NET_PREFIX}.1"
+    MASK="255.255.255.0"
+    DHCP_START="${INT_NET_PREFIX}.10"
+    DHCP_END="${INT_NET_PREFIX}.200"
+    GATEWAY="$HOST_IP"
+    DNS1="$HOST_IP"
+    DNS2="0.0.0.0"
+    EXPIRE="7200"
+
+    echo "INT_NET_PREFIX" set to "$INT_NET_PREFIX"
+    ./vpncmd /SERVER 127.0.0.1 /HUB:DEFAULT /CMD SecureNatHostSet /IP:$HOST_IP /MASK:$MASK /MAC:none
+    ./vpncmd /SERVER 127.0.0.1 /HUB:DEFAULT /CMD DhcpSet /START:$DHCP_START /END:$DHCP_END /MASK:$MASK /GW:$GATEWAY /DNS:$DNS1 /DNS2:$DNS2 /EXPIRE:$EXPIRE /DOMAIN:none /LOG:yes
+  fi
+  
   ./vpnserver stop
+
+  # move the config to the volume and link it back here
+  mkdir -p /data
+  mv vpn_server.config $CONFIG
+  ln -s $CONFIG
+
   echo "Disabling Dynamic DNS function ..."
   line=$(grep -A 19 -n DDnsClient $CONFIG | grep -m1 -B19 "}" | grep "bool Disabled" | awk -F "-" '{print $1}')
   sed -i $line's/false/true/' $CONFIG
@@ -22,7 +43,7 @@ if ! test -f "$CONFIG"; then
   sed -i $line's/false/true/' $CONFIG
   ./vpnserver start
 
-  sleep 2s
+  sleep #s
 
   ADMINPASS=$(goxkcdpwgen -n 2 -c -d "-")
   HUBPASS=$(goxkcdpwgen -n 2 -c -d "-")
@@ -35,6 +56,12 @@ if ! test -f "$CONFIG"; then
   ./vpncmd /SERVER 127.0.0.1 /CMD ServerCipherSet ECDHE-RSA-AES128-GCM-SHA256
   
   ./vpncmd /SERVER 127.0.0.1 /HUB:DEFAULT /CMD SecureNatEnable
+
+  echo "Current NAT settings:"
+  ./vpncmd /SERVER 127.0.0.1 /HUB:DEFAULT /CMD SecureNatHostGet
+  echo "Current DHCP settings:"
+  ./vpncmd /SERVER 127.0.0.1 /HUB:DEFAULT /CMD DhcpGet
+
   ./vpncmd /SERVER 127.0.0.1 /HUB:DEFAULT /CMD LogDisable packet
   
   ./vpncmd /SERVER 127.0.0.1 /HUB:DEFAULT /CMD UserCreate $USER /GROUP:none /REALNAME:none /NOTE:none
@@ -85,6 +112,7 @@ if ! test -f "$CONFIG"; then
   echo "Password: $USERPASS"
   echo ""
 else
+  ln -s $CONFIG
   ./vpnserver start
 
   echo "$CONFIG file already exists! Skipping the configuration."
@@ -98,4 +126,3 @@ echo "Connect to VPN DEFAULT Hub: ./vpncmd /SERVER /HUB:DEFAULT <host>"
 echo "Enjoy SoftEther VPN!"
 
 sleep infinity
-
